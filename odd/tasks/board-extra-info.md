@@ -37,11 +37,14 @@ Route for every task: direct inline. Only one file is non-trivial (`register.tsx
   - Evidence: tests `the lead row lists the files...` (deduplication, order, deny, isError, a subagent, Read) and `no files row...` pass. tsc passes. A `main` without `files` (the state before this change) renders: it is the initial value in every test. Commit `81253e6`.
 - [x] T4 feat: last turn time in the idle text, last advisor call's duration (only when `endedAt > startedAt`)
   - The turn time comes from the engine (`turn.complete`'s `durationMs`), not from the clock.
-  - Evidence: tests `the idle lead shows how long the last turn took` and `the advisor shows how long its last call took...` (timed, and a response that came whole) pass. tsc and validate pass.
+  - Evidence: tests `the idle lead shows how long the last turn took` and `the advisor shows how long its last call took...` (timed, and a response that came whole) pass. tsc and validate pass. Commit `b53ebe0`.
+- [x] T5 fix (from the closing review): with the reset times, the limits line went from ~37 to ~50 characters and was cut off in panes of ~41–53 columns. It now falls back to short names (`5h`, `7d`) and then drops the resets.
+  - Evidence: test `a narrow pane gets a shorter limits line...` (40 and 30 columns) passes. tsc and validate pass.
+- [x] T6 docs: the README states the files row's limits (only Edit/Write/NotebookEdit; shell edits are not seen) and the narrow form of the limits line.
 
 ## Progress
 
-Branch `feat/board-extra-info`, from `main` at `bce0f05`. All 4 tasks done: 6 tests pass, tsc passes, validate passes with the ICON_MISSING warning.
+Branch `feat/board-extra-info`, from `main` at `bce0f05`. All 6 tasks done: 7 tests pass, tsc passes, validate passes with the ICON_MISSING warning. Nobody has seen the pane drawn live; only the test kit's mounts.
 
 ## Next step
 

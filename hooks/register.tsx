@@ -205,6 +205,19 @@ function resetText(resetsAt: string | undefined, t: number): string {
   return ` ↻${Math.floor(hours / 24)}d${hours % 24}h`
 }
 
+const SHORT_LIMITS: Record<string, string> = { five_hour: '5h', seven_day: '7d' }
+const shortLimit = (kind: string) => SHORT_LIMITS[kind] ?? limitName(kind)
+
+// The limits line in the widest form that fits: full names with reset
+// times, short names with them, then short names alone, so a narrow pane
+// still shows every percentage.
+function limitsText(limits: UsageRow['limits'], t: number, width: number): string {
+  const line = (name: (kind: string) => string, resets: boolean) =>
+    `limits  ${limits.map(one => `${name(one.kind)} ${Math.round(one.percentUsed)}%${resets ? resetText(one.resetsAt, t) : ''}`).join(' · ')}`
+  const forms = [line(limitName, true), line(shortLimit, true), line(shortLimit, false)]
+  return forms.find(one => one.length <= width) ?? forms.at(-1) ?? ''
+}
+
 // Context fill, cost and rate limits, as the status line has them. Written
 // only when they change, so a quiet session redraws nothing for them.
 async function pollUsage($: EngineInterface) {
@@ -626,7 +639,7 @@ export const register: Register = on => {
           )}
           {hasLimits && (
             <Text wrap="truncate" color={limitTone}>
-              {`limits  ${spend.limits.map(one => `${limitName(one.kind)} ${Math.round(one.percentUsed)}%${resetText(one.resetsAt, t)}`).join(' · ')}`}
+              {limitsText(spend.limits, t, inner)}
             </Text>
           )}
           {hasFiles && (

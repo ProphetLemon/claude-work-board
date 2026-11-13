@@ -157,3 +157,31 @@ test('each rate limit shows when it resets', async ($, on) => {
   expect(row?.text).toBe(`limits  five hour 62% ↻${clock} · seven day 40% ↻3d4h · spend limit 10% · old 5%`)
   await ui.unmount()
 })
+
+test('a narrow pane gets a shorter limits line that keeps every percentage', async ($, on) => {
+  engine(on)
+  const iso = (ms: number) => new Date(START + ms).toISOString()
+  const hour = 3_600_000
+  on('session.usage', () => ({
+    value: {
+      startedAt: START,
+      context: { window: 200_000, tokens: 50_000, percent: 25 },
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: 62, resetsAt: iso(2 * hour) },
+        { kind: 'seven_day', percentUsed: 40, resetsAt: iso(76 * hour + 30 * 60_000) },
+      ],
+    },
+  }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const limits = async (bodyColumns: number) => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns } })
+    const text = (await ui.find({ type: 'Text', text: /^limits / }))?.text
+    await ui.unmount()
+    return text
+  }
+
+  // 40 columns hold 36 of text: short names with reset times fit.
+  expect(await limits(40)).toMatch(/^limits {2}5h 62% ↻\d\d:\d\d · 7d 40% ↻3d4h$/)
+  // 30 columns hold 26: the reset times go, the percentages stay.
+  expect(await limits(30)).toBe('limits  5h 62% · 7d 40%')
+})
