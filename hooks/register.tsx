@@ -418,8 +418,10 @@ export const register: Register = on => {
     return spawned
   })
 
+  // The tool's arguments sit on `e` itself, beside `tool` (`e.command` for
+  // Bash), so the hint is read from `e`.
   on('tool.call', async ($, e, next) => {
-    await recordToolCall($, e.agentId, e.tool, (e as { input?: unknown }).input).catch(() => undefined)
+    await recordToolCall($, e.agentId, e.tool, e).catch(() => undefined)
 
     return next(e)
   })
