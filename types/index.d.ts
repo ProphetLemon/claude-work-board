@@ -26,6 +26,8 @@ export type MainRow = {
   busy: boolean
   turnStartedAt?: number
   startedAt: number
+  // Paths the lead changed, newest first. Absent in a value stored before it.
+  files?: string[]
 }
 
 export type LimitRow = { kind: string; percentUsed: number; resetsAt?: string }

@@ -32,8 +32,9 @@ Route for every task: direct inline. Only one file is non-trivial (`register.tsx
 - [x] T1 fix: read the tool's arguments from `e`, so hints and file names show
   - Evidence: `tests/board.test.tsx` fails without the fix (`Expected: defined, Received: undefined`) and passes with it. tsc passes; it needed a double cast on `$.tool.call` in the test, because the Edit-typed overload hits TS2589. Commit `6c41f7b`.
 - [x] T2 feat: limit reset time on the limits line (`↻HH:MM` under 24h, `↻Nd Hh` beyond)
-  - Evidence: test `each rate limit shows when it resets` passes (under 24h, beyond 24h, missing, past). tsc passes.
-- [ ] T3 feat: files the lead changed (Edit/Write/NotebookEdit, not denied or errored, deduplicated, basenames, capped), on one conditional LEAD row
+  - Evidence: test `each rate limit shows when it resets` passes (under 24h, beyond 24h, missing, past). tsc passes. Commit `103f58e`.
+- [x] T3 feat: files the lead changed (Edit/Write/NotebookEdit, not denied or errored, deduplicated, basenames, capped), on one conditional LEAD row
+  - Evidence: tests `the lead row lists the files...` (deduplication, order, deny, isError, a subagent, Read) and `no files row...` pass. tsc passes. A `main` without `files` (the state before this change) renders: it is the initial value in every test.
 - [ ] T4 feat: last turn time in the idle text, last advisor call's duration (only when `endedAt > startedAt`)
 
 ## Progress

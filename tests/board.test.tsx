@@ -25,7 +25,13 @@ function engine(on: On) {
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('agent.list', () => ({ value: [] }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('tool.call', () => ({ result: {} }))
+  // A path naming `denied` is refused, one naming `broken` fails.
+  on('tool.call', (_, e) => {
+    const path = String((e as { file_path?: unknown }).file_path ?? '')
+    if (path.includes('denied')) return { deny: 'not allowed' }
+    if (path.includes('broken')) return { isError: true as const, result: 'failed' }
+    return { result: {} }
+  })
   return clock
 }
 
@@ -46,6 +52,36 @@ test('a tool call shows its argument hint in the log', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const row = await ui.find({ type: 'Text', text: /Edit: register\.tsx/ })
   expect(row).toBeDefined()
+  await ui.unmount()
+})
+
+test('the lead row lists the files the lead changed, newest first', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const call = $.tool.call as unknown as (input: Record<string, unknown>) => Promise<unknown>
+  const edit = (file_path: string, more: Record<string, unknown> = {}) =>
+    call({ tool: 'Edit', file_path, old_string: 'a', new_string: 'b', ...more })
+
+  await edit('/repo/a.ts')
+  await call({ tool: 'Write', file_path: '/repo/b.ts', content: 'x' })
+  await edit('/repo/a.ts')
+  await edit('/repo/denied.ts')
+  await call({ tool: 'Write', file_path: '/repo/broken.ts', content: 'x' })
+  await edit('/repo/sub.ts', { agentId: 'a1' })
+  await call({ tool: 'Read', file_path: '/repo/read.ts' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const row = await ui.find({ type: 'Text', text: /^files / })
+  expect(row?.text).toBe('files   2 · a.ts, b.ts')
+  await ui.unmount()
+})
+
+test('no files row before the lead changes a file', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^files / })).toBeUndefined()
   await ui.unmount()
 })
 

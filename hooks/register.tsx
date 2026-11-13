@@ -16,6 +16,7 @@ const TYPE_MS_PER_CHAR = 22
 const LOG_KEEP = 200
 const AGENT_KEEP = 40
 const TIMES_KEEP = 24
+const FILES_KEEP = 100
 
 // Role colours, as in a terminal dashboard: orange lead, purple advisor,
 // blue swarm, green for finished work. Each has a bright twin for the glow.
@@ -154,6 +155,18 @@ function toolHint(input: unknown): string {
 // The tool calls not worth a log line: reads and searches are counted, not
 // listed, so the log keeps what changed.
 const QUIET = new Set(['Read', 'Grep', 'Glob', 'ToolSearch', 'Agent', 'Task'])
+
+// The tools that change a file, and the argument that names it.
+const EDITS: Record<string, string> = { Edit: 'file_path', Write: 'file_path', NotebookEdit: 'notebook_path' }
+
+function editedPath(tool: string, input: unknown): string | undefined {
+  const key = EDITS[tool]
+  if (!key || !input || typeof input !== 'object') return undefined
+  const value = (input as Record<string, unknown>)[key]
+  return typeof value === 'string' && value ? value : undefined
+}
+
+const baseName = (path: string) => path.split('/').pop() || path
 
 function describeTool(tool: string, input: unknown): string {
   const hint = toolHint(input)
@@ -342,6 +355,14 @@ async function recordToolCall($: EngineInterface, agentId: string | undefined, t
   await addLog($, 'lead', describeTool(tool, input))
 }
 
+// The newest change first, each path once.
+async function recordFile($: EngineInterface, path: string) {
+  await update($, main, row => ({
+    ...row,
+    files: [path, ...(row.files ?? []).filter(one => one !== path)].slice(0, FILES_KEEP),
+  }))
+}
+
 async function recordStep(
   $: EngineInterface,
   model: string,
@@ -433,11 +454,15 @@ export const register: Register = on => {
   })
 
   // The tool's arguments sit on `e` itself, beside `tool` (`e.command` for
-  // Bash), so the hint is read from `e`.
+  // Bash), so the hint is read from `e`. A file counts as changed only once
+  // the lead's call went through: not denied, not an error.
   on('tool.call', async ($, e, next) => {
     await recordToolCall($, e.agentId, e.tool, e).catch(() => undefined)
+    const done = await next(e)
+    const path = e.agentId ? undefined : editedPath(e.tool, e)
+    if (path && done.deny === undefined && !done.isError) await recordFile($, path).catch(() => undefined)
 
-    return next(e)
+    return done
   })
 
   on('turn.step', async function* ($, e, next) {
@@ -480,7 +505,9 @@ export const register: Register = on => {
     // finished one two; the log gets what is left, at least three lines.
     const hasContext = spend.window > 0
     const hasLimits = spend.limits.length > 0
-    const leadRows = 5 + (hasContext ? 1 : 0) + (hasLimits ? 1 : 0)
+    const files = lead.files ?? []
+    const hasFiles = files.length > 0
+    const leadRows = 5 + (hasContext ? 1 : 0) + (hasLimits ? 1 : 0) + (hasFiles ? 1 : 0)
     const fixed = leadRows + 5 + 1 + 3 + 1 + 3 + 1
     let room = Math.max(3, rows - fixed - 3)
     const shownOpen: AgentRow[] = []
@@ -578,6 +605,12 @@ export const register: Register = on => {
           {hasLimits && (
             <Text wrap="truncate" color={limitTone}>
               {`limits  ${spend.limits.map(one => `${limitName(one.kind)} ${Math.round(one.percentUsed)}%${resetText(one.resetsAt, t)}`).join(' · ')}`}
+            </Text>
+          )}
+          {hasFiles && (
+            <Text wrap="truncate">
+              <Text color={LINE}>{`files   ${files.length} · `}</Text>
+              <Text>{files.map(baseName).join(', ')}</Text>
             </Text>
           )}
         </Box>
