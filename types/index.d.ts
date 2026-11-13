@@ -9,6 +9,7 @@ export type AgentRow = {
   endedAt?: number
   tools: number
   lastToolAt?: number
+  lastTool?: string
   background: boolean
 }
 
@@ -27,12 +28,23 @@ export type MainRow = {
   startedAt: number
 }
 
+export type LimitRow = { kind: string; percentUsed: number; resetsAt?: string }
+
+export type UsageRow = {
+  tokens?: number
+  window: number
+  percent: number
+  usd?: number
+  limits: LimitRow[]
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'work-board': {
       agents: Shaped<AgentRow[]>
       log: Shaped<LogRow[]>
       main: Shaped<MainRow>
+      usage: Shaped<UsageRow>
     }
   }
 }

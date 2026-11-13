@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 
-import type { AgentRow, LogRow, MainRow } from '../types'
+import type { AgentRow, LogRow, MainRow, UsageRow } from '../types'
 
 const PANE = 'work-board'
 const TITLE = 'Work board'
 const SYNC_MS = 3000
+const USAGE_MS = 5000
 // One animation frame. The pane is redrawn at this rate only while something
 // moves (a turn, a running subagent, a fresh event); otherwise once a second.
 const FRAME_MS = 140
@@ -26,6 +27,7 @@ const SWARM = '#8fb3ff'
 const SWARM_HI = '#d2e2ff'
 const DONE = '#9ece6a'
 const FAIL = '#f7768e'
+const WARN = '#e0af68'
 const LINE = '#565f89'
 const BRIGHT = '#ffffff'
 
@@ -50,6 +52,12 @@ const main = atom(
     startedAt: 0,
   } as MainRow,
   { shape: 'main-2' },
+)
+
+const usage = atom(
+  { plugin: 'work-board', key: 'usage' } as const,
+  { window: 0, percent: 0, limits: [] } as UsageRow,
+  { shape: 'usage-1' },
 )
 
 // Animation pacing only; losing these on a reload costs one idle second.
@@ -147,6 +155,41 @@ function toolHint(input: unknown): string {
 // listed, so the log keeps what changed.
 const QUIET = new Set(['Read', 'Grep', 'Glob', 'ToolSearch', 'Agent', 'Task'])
 
+function describeTool(tool: string, input: unknown): string {
+  const hint = toolHint(input)
+  return hint ? `${tool}: ${clip(hint, 56)}` : tool
+}
+
+function tokensText(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`
+  return `${Math.round(n / 1000)}k`
+}
+
+function meter(percent: number, width: number): string {
+  const filled = Math.min(width, Math.max(0, Math.round((percent / 100) * width)))
+  return '▰'.repeat(filled) + '▱'.repeat(width - filled)
+}
+
+const limitName = (kind: string) => clip(kind.replace(/[_-]+/g, ' '), 12)
+
+// Context fill, cost and rate limits, as the status line has them. Written
+// only when they change, so a quiet session redraws nothing for them.
+async function pollUsage($: EngineInterface) {
+  const now = await $.session.usage()
+  const window = now.context.window
+  const percent =
+    now.context.percent ?? (now.context.tokens !== undefined && window > 0 ? (now.context.tokens / window) * 100 : 0)
+  const row: UsageRow = {
+    tokens: now.context.tokens,
+    window,
+    percent,
+    usd: now.cost?.usd,
+    limits: now.rateLimits.map(one => ({ kind: one.kind, percentUsed: one.percentUsed, resetsAt: one.resetsAt })),
+  }
+  const before = await read($, usage)
+  if (JSON.stringify(before) !== JSON.stringify(row)) await update($, usage, () => row)
+}
+
 function wake(at: number) {
   animateUntil = Math.max(animateUntil, at + RECENT_MS)
 }
@@ -177,6 +220,7 @@ async function sync($: EngineInterface) {
     infos = []
   }
   const ended: string[] = []
+  const alerts: string[] = []
   const seeded: AgentRow[] = []
   let changed = false
   const current = await read($, agents)
@@ -193,6 +237,7 @@ async function sync($: EngineInterface) {
     if (!isOpen(info.status)) {
       const verb = info.status === 'failed' || info.status === 'killed' ? info.status : 'done'
       ended.push(`${verb}: ${clip(row.description, 48)}`)
+      if (row.background) alerts.push(`${verb === 'done' ? 'Done' : verb === 'failed' ? 'Failed' : 'Stopped'}: ${clip(row.description, 80)}`)
     }
     return { ...row, id: info.id, status: info.status, endedAt: isOpen(info.status) ? undefined : at }
   })
@@ -214,6 +259,10 @@ async function sync($: EngineInterface) {
   if (changed) await update($, agents, () => [...next, ...seeded].slice(-AGENT_KEEP))
   openAgents = [...next, ...seeded].filter(row => isOpen(row.status)).length
   for (const text of ended) await addLog($, 'swarm', text)
+  for (const text of alerts) {
+    $.ui.toast(text, { timeoutMs: 6000 })
+    await $.ui.notify(text, { title: 'Subagent finished' }).catch(() => undefined)
+  }
   for (const row of seeded) await addLog($, 'swarm', `found running: ${clip(row.description, 48)}`)
 }
 
@@ -266,14 +315,17 @@ async function recordToolCall($: EngineInterface, agentId: string | undefined, t
   const at = await $.clock.now()
   if (agentId) {
     await update($, agents, list =>
-      list.map(one => (one.id === agentId ? { ...one, tools: one.tools + 1, lastToolAt: at } : one)),
+      list.map(one =>
+        one.id === agentId
+          ? { ...one, tools: one.tools + 1, lastToolAt: at, lastTool: describeTool(tool, input) }
+          : one,
+      ),
     )
     return
   }
   await update($, main, row => ({ ...row, toolCalls: row.toolCalls + 1 }))
   if (QUIET.has(tool)) return
-  const hint = toolHint(input)
-  await addLog($, 'lead', hint ? `${tool}: ${clip(hint, 56)}` : tool)
+  await addLog($, 'lead', describeTool(tool, input))
 }
 
 async function recordStep(
@@ -327,6 +379,10 @@ export const register: Register = on => {
     $.clock.every(SYNC_MS, () => {
       void sync($)
     })
+    $.clock.every(USAGE_MS, () => {
+      void pollUsage($).catch(() => undefined)
+    })
+    void pollUsage($).catch(() => undefined)
     void $.ui.open({ id: PANE, title: TITLE })
     void sync($)
 
@@ -387,6 +443,7 @@ export const register: Register = on => {
     const lead = await read($, main)
     const swarm = await read($, agents)
     const lines = await read($, log)
+    const spend = await read($, usage)
     const breathe = f % 8 < 4
 
     // Lead: the border breathes while a turn runs.
@@ -403,10 +460,30 @@ export const register: Register = on => {
     // Swarm: running first, then the latest finished, as many as fit.
     const open = swarm.filter(one => isOpen(one.status))
     const closed = swarm.filter(one => !isOpen(one.status))
-    const fixed = 5 + 5 + 1 + 3 + 1 + 3 + 1
-    const agentRoom = Math.max(1, Math.floor((rows - fixed - 3) / 2))
-    const shown = [...open, ...closed.slice(-Math.max(0, agentRoom - open.length))].slice(0, agentRoom)
-    const logRoom = Math.max(3, rows - fixed - Math.max(1, shown.length) * 2)
+    // A running subagent takes three rows (name, bar, last action), a
+    // finished one two; the log gets what is left, at least three lines.
+    const hasContext = spend.window > 0
+    const hasLimits = spend.limits.length > 0
+    const leadRows = 5 + (hasContext ? 1 : 0) + (hasLimits ? 1 : 0)
+    const fixed = leadRows + 5 + 1 + 3 + 1 + 3 + 1
+    let room = Math.max(3, rows - fixed - 3)
+    const shownOpen: AgentRow[] = []
+    for (const one of open) {
+      if (room < 3 && shownOpen.length > 0) break
+      shownOpen.push(one)
+      room -= 3
+    }
+    const shownClosed: AgentRow[] = []
+    for (const one of [...closed].reverse()) {
+      if (room < 2) break
+      shownClosed.unshift(one)
+      room -= 2
+    }
+    const shown = [...shownOpen, ...shownClosed]
+    const agentLines = shownOpen.length * 3 + shownClosed.length * 2
+    const logRoom = Math.max(3, rows - fixed - Math.max(1, agentLines))
+    const contextTone = spend.percent >= 85 ? (breathe ? FAIL : WARN) : spend.percent >= 70 ? WARN : LEAD
+    const limitTone = spend.limits.some(one => one.percentUsed >= 80) ? WARN : LINE
     const spawning = swarm.some(one => t - one.startedAt < RECENT_MS)
     const returning = closed.some(one => one.endedAt !== undefined && t - one.endedAt < RECENT_MS)
     const swarmBorder = open.length > 0 && (spawning ? f % 2 === 0 : breathe) ? SWARM_HI : SWARM
@@ -439,6 +516,11 @@ export const register: Register = on => {
               {` ${shortModel(one.model)} · ${one.tools} tools · ${time}${extra}`}
             </Text>
           </Box>
+          {running && (
+            <Text wrap="truncate" color={busyNow ? SWARM_HI : LINE}>
+              {`  ↳ ${clip(one.lastTool ?? 'starting…', inner - 4)}`}
+            </Text>
+          )}
         </Box>
       )
     }
@@ -467,6 +549,21 @@ export const register: Register = on => {
           <Text wrap="truncate" color={LINE}>
             {`${lead.toolCalls} tool calls · ${lead.steps} steps${lead.startedAt ? ` · up ${elapsedText(t - lead.startedAt)}` : ''}`}
           </Text>
+          {hasContext && (
+            <Text wrap="truncate">
+              <Text color={LINE}>{'context '}</Text>
+              <Text color={contextTone}>{meter(spend.percent, Math.min(12, Math.max(6, inner - 34)))}</Text>
+              <Text color={contextTone} bold={spend.percent >= 85}>{` ${Math.round(spend.percent)}%`}</Text>
+              <Text color={LINE}>
+                {`${spend.tokens !== undefined ? ` · ${tokensText(spend.tokens)}/${tokensText(spend.window)}` : ''}${spend.usd !== undefined ? ` · $${spend.usd.toFixed(2)}` : ''}`}
+              </Text>
+            </Text>
+          )}
+          {hasLimits && (
+            <Text wrap="truncate" color={limitTone}>
+              {`limits  ${spend.limits.map(one => `${limitName(one.kind)} ${Math.round(one.percentUsed)}%`).join(' · ')}`}
+            </Text>
+          )}
         </Box>
         <Box flexDirection="column" borderStyle="round" borderColor={advisorBorder} borderDimColor={!advising} paddingX={1}>
           <Text>
