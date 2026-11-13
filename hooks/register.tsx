@@ -172,6 +172,20 @@ function meter(percent: number, width: number): string {
 
 const limitName = (kind: string) => clip(kind.replace(/[_-]+/g, ' '), 12)
 
+// When a limit window resets: the clock time within a day, days and hours
+// beyond, so a weekly window does not read as today. Nothing for a time
+// that is missing, unreadable or already past.
+function resetText(resetsAt: string | undefined, t: number): string {
+  const at = resetsAt ? Date.parse(resetsAt) : Number.NaN
+  if (!Number.isFinite(at) || at <= t) return ''
+  if (at - t < 86_400_000) {
+    const d = new Date(at)
+    return ` ↻${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+  const hours = Math.floor((at - t) / 3_600_000)
+  return ` ↻${Math.floor(hours / 24)}d${hours % 24}h`
+}
+
 // Context fill, cost and rate limits, as the status line has them. Written
 // only when they change, so a quiet session redraws nothing for them.
 async function pollUsage($: EngineInterface) {
@@ -563,7 +577,7 @@ export const register: Register = on => {
           )}
           {hasLimits && (
             <Text wrap="truncate" color={limitTone}>
-              {`limits  ${spend.limits.map(one => `${limitName(one.kind)} ${Math.round(one.percentUsed)}%`).join(' · ')}`}
+              {`limits  ${spend.limits.map(one => `${limitName(one.kind)} ${Math.round(one.percentUsed)}%${resetText(one.resetsAt, t)}`).join(' · ')}`}
             </Text>
           )}
         </Box>

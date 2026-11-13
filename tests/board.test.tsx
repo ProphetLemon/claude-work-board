@@ -48,3 +48,29 @@ test('a tool call shows its argument hint in the log', async ($, on) => {
   expect(row).toBeDefined()
   await ui.unmount()
 })
+
+test('each rate limit shows when it resets', async ($, on) => {
+  engine(on)
+  const iso = (ms: number) => new Date(START + ms).toISOString()
+  const hour = 3_600_000
+  on('session.usage', () => ({
+    value: {
+      startedAt: START,
+      context: { window: 200_000, tokens: 50_000, percent: 25 },
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: 62, resetsAt: iso(2 * hour) },
+        { kind: 'seven_day', percentUsed: 40, resetsAt: iso(76 * hour + 30 * 60_000) },
+        { kind: 'spend_limit', percentUsed: 10 },
+        { kind: 'old', percentUsed: 5, resetsAt: iso(-hour) },
+      ],
+    },
+  }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const soon = new Date(START + 2 * hour)
+  const clock = `${String(soon.getHours()).padStart(2, '0')}:${String(soon.getMinutes()).padStart(2, '0')}`
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const row = await ui.find({ type: 'Text', text: /^limits / })
+  expect(row?.text).toBe(`limits  five hour 62% ↻${clock} · seven day 40% ↻3d4h · spend limit 10% · old 5%`)
+  await ui.unmount()
+})

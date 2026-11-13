@@ -30,8 +30,9 @@ Show more useful information on the work board without taking rows from the sess
 Route for every task: direct inline. Only one file is non-trivial (`register.tsx`). It was read in full, and the design is settled.
 
 - [x] T1 fix: read the tool's arguments from `e`, so hints and file names show
-  - Evidence: `tests/board.test.tsx` fails without the fix (`Expected: defined, Received: undefined`) and passes with it. tsc passes; it needed a double cast on `$.tool.call` in the test, because the Edit-typed overload hits TS2589.
-- [ ] T2 feat: limit reset time on the limits line (`↻HH:MM` under 24h, `↻Nd Hh` beyond)
+  - Evidence: `tests/board.test.tsx` fails without the fix (`Expected: defined, Received: undefined`) and passes with it. tsc passes; it needed a double cast on `$.tool.call` in the test, because the Edit-typed overload hits TS2589. Commit `6c41f7b`.
+- [x] T2 feat: limit reset time on the limits line (`↻HH:MM` under 24h, `↻Nd Hh` beyond)
+  - Evidence: test `each rate limit shows when it resets` passes (under 24h, beyond 24h, missing, past). tsc passes.
 - [ ] T3 feat: files the lead changed (Edit/Write/NotebookEdit, not denied or errored, deduplicated, basenames, capped), on one conditional LEAD row
 - [ ] T4 feat: last turn time in the idle text, last advisor call's duration (only when `endedAt > startedAt`)
 
