@@ -2,8 +2,8 @@
 
 A Claude Code mod that keeps a live board beside the chat, so you can watch the session work:
 
-- **Lead**: the main session's model, effort, tool calls and steps, and how long the current turn has been running. Also the context window fill, the cost, and each rate limit with when it resets (the clock time within a day, days and hours beyond). It also lists the files the lead changed, newest first. Calls that were denied or failed, and subagents' edits, are left out.
-- **Advisor**: how many times the advisor was consulted, when it was last consulted, and a timeline of the calls.
+- **Lead**: the main session's model, effort, tool calls and steps, how long the current turn has been running and, once it ends, how long it took. Also the context window fill, the cost, and each rate limit with when it resets (the clock time within a day, days and hours beyond). It also lists the files the lead changed, newest first. Calls that were denied or failed, and subagents' edits, are left out.
+- **Advisor**: how many times the advisor was consulted, when it was last consulted and how long that call took, and a timeline of the calls.
 - **Swarm**: every subagent with its model, its tool calls, its elapsed time and whether it is running, done or failed.
 - **Session log**: the latest events with their time.
 

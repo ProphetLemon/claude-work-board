@@ -90,6 +90,12 @@ function elapsedText(ms: number): string {
   return `${Math.floor(m / 60)}h${pad(m % 60)}m`
 }
 
+// A short span with a tenth of a second (4.2s), a longer one as elapsed time.
+// Never below 0.1s, so a timed call does not read as taking nothing.
+function durationText(ms: number): string {
+  return ms < 10_000 ? `${(Math.max(100, ms) / 1000).toFixed(1)}s` : elapsedText(ms)
+}
+
 function shortModel(model: string): string {
   const m = model.toLowerCase()
   for (const name of ['opus', 'sonnet', 'haiku', 'fable']) if (m.includes(name)) return name
@@ -371,6 +377,13 @@ async function recordStep(
 ) {
   const times = advisorUses.map(use => use.endedAt ?? use.startedAt)
   const last = times.at(-1)
+  // The latest call's own duration, or none when it was not timed apart
+  // (no result yet, or a response that came whole stamps both alike).
+  const lastUse = advisorUses.at(-1)
+  const lastSpan =
+    lastUse?.endedAt !== undefined && lastUse.endedAt > lastUse.startedAt
+      ? lastUse.endedAt - lastUse.startedAt
+      : undefined
   await update($, main, row => ({
     ...row,
     model: model || row.model,
@@ -379,15 +392,21 @@ async function recordStep(
     advisorCalls: row.advisorCalls + advisorUses.length,
     advisorTimes: [...(row.advisorTimes ?? []), ...times].slice(-TIMES_KEEP),
     lastAdvisorAt: last ?? row.lastAdvisorAt,
+    lastAdvisorMs: lastUse ? lastSpan : row.lastAdvisorMs,
   }))
   for (let i = 0; i < advisorUses.length; i += 1) await addLog($, 'advisor', 'consulted')
 }
 
-async function markBusy($: EngineInterface, busy: boolean) {
+async function markBusy($: EngineInterface, busy: boolean, turnMs?: number) {
   const at = await $.clock.now()
   mainBusy = busy
   wake(at)
-  await update($, main, row => ({ ...row, busy, turnStartedAt: busy ? at : row.turnStartedAt }))
+  await update($, main, row => ({
+    ...row,
+    busy,
+    turnStartedAt: busy ? at : row.turnStartedAt,
+    lastTurnMs: turnMs ?? row.lastTurnMs,
+  }))
 }
 
 async function start($: EngineInterface) {
@@ -440,7 +459,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    if (!(e as { agentId?: string }).agentId) await markBusy($, false).catch(() => undefined)
+    if (!(e as { agentId?: string }).agentId) await markBusy($, false, e.durationMs).catch(() => undefined)
 
     return done
   })
@@ -490,7 +509,10 @@ export const register: Register = on => {
     // Lead: the border breathes while a turn runs.
     const busy = lead.busy
     const leadBorder = busy && breathe ? LEAD_HI : LEAD
-    const working = busy && lead.turnStartedAt ? `working ${elapsedText(t - lead.turnStartedAt)}` : 'idle · your turn'
+    const working =
+      busy && lead.turnStartedAt
+        ? `working ${elapsedText(t - lead.turnStartedAt)}`
+        : `idle · your turn${lead.lastTurnMs !== undefined ? ` · last turn ${durationText(lead.lastTurnMs)}` : ''}`
 
     // Advisor: flashes for a few seconds after a consultation.
     const advising = lead.lastAdvisorAt !== undefined && t - lead.lastAdvisorAt < RECENT_MS
@@ -622,7 +644,7 @@ export const register: Register = on => {
             </Text>
           </Text>
           <Text wrap="truncate">
-            {`${lead.advisorCalls} calls${lead.lastAdvisorAt ? ` · last ${clockText(lead.lastAdvisorAt)}` : ''}`}
+            {`${lead.advisorCalls} calls${lead.lastAdvisorAt ? ` · last ${clockText(lead.lastAdvisorAt)}` : ''}${lead.lastAdvisorAt && lead.lastAdvisorMs !== undefined ? ` (${durationText(lead.lastAdvisorMs)})` : ''}`}
           </Text>
           {advising ? (
             <Text wrap="truncate">

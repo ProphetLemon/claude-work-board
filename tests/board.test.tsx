@@ -85,6 +85,53 @@ test('no files row before the lead changes a file', async ($, on) => {
   await ui.unmount()
 })
 
+test('the idle lead shows how long the last turn took', async ($, on) => {
+  engine(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await $.turn.complete({ answer: 'ok', durationMs: 62_000, isAborted: false, turnId: 't1', reason: 'answer' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /idle · your turn · last turn 1m02s$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the advisor shows how long its last call took, when it was timed', async ($, on) => {
+  engine(on)
+  let uses: { startedAt: number; endedAt: number }[] = []
+  on('turn.step', async function* (_, e) {
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: '',
+      toolUses: [],
+      serverToolUses: uses.map((one, i) => ({ id: `s${i}`, name: 'advisor', input: {}, ...one })),
+    } as never
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const step = async (index: number) => {
+    const stream = $.turn.step({ turnId: 't1', index, model: 'claude-opus-5-5', messageCount: 1 })
+    for await (const _ of stream) {
+      // The test's step yields nothing; reading it runs the mod's hook.
+    }
+  }
+
+  uses = [{ startedAt: START + 1000, endedAt: START + 5200 }]
+  await step(0)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /calls · last/ }))?.text).toMatch(/^1 calls · last \d\d:\d\d:\d\d \(4\.2s\)$/)
+  await ui.unmount()
+
+  // A response that came whole stamps both alike: no duration to show.
+  uses = [{ startedAt: START + 9000, endedAt: START + 9000 }]
+  await step(1)
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await again.find({ type: 'Text', text: /calls · last/ }))?.text).toMatch(/^2 calls · last \d\d:\d\d:\d\d$/)
+  await again.unmount()
+})
+
 test('each rate limit shows when it resets', async ($, on) => {
   engine(on)
   const iso = (ms: number) => new Date(START + ms).toISOString()

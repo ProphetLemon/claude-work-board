@@ -34,13 +34,15 @@ Route for every task: direct inline. Only one file is non-trivial (`register.tsx
 - [x] T2 feat: limit reset time on the limits line (`↻HH:MM` under 24h, `↻Nd Hh` beyond)
   - Evidence: test `each rate limit shows when it resets` passes (under 24h, beyond 24h, missing, past). tsc passes. Commit `103f58e`.
 - [x] T3 feat: files the lead changed (Edit/Write/NotebookEdit, not denied or errored, deduplicated, basenames, capped), on one conditional LEAD row
-  - Evidence: tests `the lead row lists the files...` (deduplication, order, deny, isError, a subagent, Read) and `no files row...` pass. tsc passes. A `main` without `files` (the state before this change) renders: it is the initial value in every test.
-- [ ] T4 feat: last turn time in the idle text, last advisor call's duration (only when `endedAt > startedAt`)
+  - Evidence: tests `the lead row lists the files...` (deduplication, order, deny, isError, a subagent, Read) and `no files row...` pass. tsc passes. A `main` without `files` (the state before this change) renders: it is the initial value in every test. Commit `81253e6`.
+- [x] T4 feat: last turn time in the idle text, last advisor call's duration (only when `endedAt > startedAt`)
+  - The turn time comes from the engine (`turn.complete`'s `durationMs`), not from the clock.
+  - Evidence: tests `the idle lead shows how long the last turn took` and `the advisor shows how long its last call took...` (timed, and a response that came whole) pass. tsc and validate pass.
 
 ## Progress
 
-Branch `feat/board-extra-info`, from `main` at `bce0f05`.
+Branch `feat/board-extra-info`, from `main` at `bce0f05`. All 4 tasks done: 6 tests pass, tsc passes, validate passes with the ICON_MISSING warning.
 
 ## Next step
 
-T1.
+The person decides on push, PR or merge. Install the mod again (or reload it) to see the changes in the pane.

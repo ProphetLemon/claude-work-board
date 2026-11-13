@@ -28,6 +28,9 @@ export type MainRow = {
   startedAt: number
   // Paths the lead changed, newest first. Absent in a value stored before it.
   files?: string[]
+  // How long the last finished turn ran, and the last advisor call took.
+  lastTurnMs?: number
+  lastAdvisorMs?: number
 }
 
 export type LimitRow = { kind: string; percentUsed: number; resetsAt?: string }
