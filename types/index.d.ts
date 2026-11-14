@@ -11,6 +11,8 @@ export type AgentRow = {
   lastToolAt?: number
   lastTool?: string
   background: boolean
+  // Set for a workflow script's agent: the engine never lists those.
+  workflow?: boolean
 }
 
 export type LogRow = { at: number; who: 'lead' | 'advisor' | 'swarm'; text: string }

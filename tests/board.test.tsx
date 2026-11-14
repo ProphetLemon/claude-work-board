@@ -18,12 +18,12 @@ const PANE = {
 } as const
 
 // The engine beneath the mod: the calls its session.start makes, answered.
-function engine(on: On) {
+function engine(on: On, list: () => unknown = () => ({ value: [] })) {
   const clock = mock.clock(on, { now: START })
   on('command.register', () => ({ value: { command: 'board' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('agent.list', () => ({ value: [] }))
+  on('agent.list', list as never)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   // A path naming `denied` is refused, one naming `broken` fails.
   on('tool.call', (_, e) => {
@@ -184,4 +184,139 @@ test('a narrow pane gets a shorter limits line that keeps every percentage', asy
   expect(await limits(40)).toMatch(/^limits {2}5h 62% ↻\d\d:\d\d · 7d 40% ↻3d4h$/)
   // 30 columns hold 26: the reset times go, the percentages stay.
   expect(await limits(30)).toBe('limits  5h 62% · 7d 40%')
+})
+
+// A board that runs its sync timer against the agent list a test sets.
+function swarm(on: On) {
+  const state: { list: unknown[] | 'broken' } = { list: [] }
+  const clock = engine(on, () => {
+    if (state.list === 'broken') throw new Error('list failed')
+    return { value: state.list }
+  })
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: `id-${e.tool_use_id}` }) as never)
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  return { clock, state }
+}
+
+type Call = (input: Record<string, unknown>) => Promise<unknown>
+const spawnArgs = (id: string, more: Record<string, unknown> = {}) => ({
+  tool_use_id: id,
+  prompt: 'p',
+  description: `task ${id}`,
+  subagentType: 'general-purpose',
+  parentModel: 'claude-opus-5-5',
+  fork: false,
+  background: false,
+  ...more,
+})
+
+// The swarm header and the log, as the pane shows them.
+async function board($: Parameters<Extract<Parameters<typeof test>[1], (...args: never[]) => unknown>>[0], clock: { advance: (ms: number) => Promise<unknown> }) {
+  await clock.advance(3000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const header = (await ui.find({ type: 'Text', text: /\d+ running · \d+ done/ }))?.text
+  const log = async (text: RegExp) => (await ui.find({ type: 'Text', text })) !== undefined
+  return { ui, header, log }
+}
+
+test('a row whose end was missed closes once the grace has passed', async ($, on) => {
+  const { clock } = swarm(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await ($.agent.spawn as unknown as Call)(spawnArgs('t1'))
+
+  // Inside the grace the agent may just not be listed yet.
+  await clock.advance(20_000)
+  const young = await board($, clock)
+  expect(young.header).toMatch(/1 running · 0 done/)
+  await young.ui.unmount()
+
+  await clock.advance(30_000)
+  const gone = await board($, clock)
+  expect(gone.header).toMatch(/0 running · 1 done/)
+  expect(await gone.log(/gone: task t1/)).toBe(true)
+  await gone.ui.unmount()
+})
+
+test('a list that fails to resolve closes nothing', async ($, on) => {
+  const { clock, state } = swarm(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await ($.agent.spawn as unknown as Call)(spawnArgs('t1'))
+
+  state.list = 'broken'
+  await clock.advance(120_000)
+  const shown = await board($, clock)
+  expect(shown.header).toMatch(/1 running · 0 done/)
+  await shown.ui.unmount()
+
+  // The same row closes once the list resolves again.
+  state.list = []
+  const later = await board($, clock)
+  expect(later.header).toMatch(/0 running · 1 done/)
+  await later.ui.unmount()
+})
+
+test('a listed agent stays open however long it runs', async ($, on) => {
+  const { clock, state } = swarm(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await ($.agent.spawn as unknown as Call)(spawnArgs('t1'))
+
+  state.list = [{ id: 'id-t1', description: 'task t1', type: 'general-purpose', status: 'running' }]
+  await clock.advance(120_000)
+  const shown = await board($, clock)
+  expect(shown.header).toMatch(/1 running · 0 done/)
+  await shown.ui.unmount()
+})
+
+test('a workflow row is never judged missing and closes on its own turn.complete', async ($, on) => {
+  const { clock } = swarm(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await ($.agent.spawn as unknown as Call)(spawnArgs('w1', { workflow: { runId: 'wf_1', agentIndex: 1 } }))
+
+  await clock.advance(120_000)
+  const open = await board($, clock)
+  expect(open.header).toMatch(/1 running · 0 done/)
+  await open.ui.unmount()
+
+  await $.turn.complete({ answer: 'ok', durationMs: 5, isAborted: false, turnId: 't', reason: 'answer', agentId: 'id-w1' } as never)
+  const closed = await board($, clock)
+  expect(closed.header).toMatch(/0 running · 1 done/)
+  await closed.ui.unmount()
+})
+
+test('a subagent turn.complete closes its row as completed, killed or failed', async ($, on) => {
+  const { clock } = swarm(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const spawn = $.agent.spawn as unknown as Call
+  await spawn(spawnArgs('a', { background: true }))
+  await spawn(spawnArgs('b'))
+  await spawn(spawnArgs('c'))
+  const end = (agentId: string, more: Record<string, unknown>) =>
+    $.turn.complete({ answer: '', durationMs: 5, isAborted: false, turnId: agentId, reason: 'answer', agentId, ...more } as never)
+
+  await end('id-a', {})
+  await end('id-b', { isAborted: true, reason: 'aborted' })
+  await end('id-c', { reason: 'error' })
+  // A turn of an agent the board has no row for changes nothing.
+  await end('id-none', {})
+
+  const shown = await board($, clock)
+  expect(shown.header).toMatch(/0 running · 3 done/)
+  expect(await shown.log(/done: task a/)).toBe(true)
+  expect(await shown.log(/killed: task b/)).toBe(true)
+  expect(await shown.log(/failed: task c/)).toBe(true)
+  await shown.ui.unmount()
+})
+
+test('a subagent turn.complete leaves the lead busy state alone', async ($, on) => {
+  const { clock } = swarm(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await ($.agent.spawn as unknown as Call)(spawnArgs('a'))
+  await $.turn.start({ text: 'hi', turnId: 'lead' })
+  await $.turn.complete({ answer: '', durationMs: 5, isAborted: false, turnId: 'x', reason: 'answer', agentId: 'id-a' } as never)
+
+  await clock.advance(1000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /working / })).toBeDefined()
+  await ui.unmount()
 })

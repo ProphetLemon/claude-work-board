@@ -17,6 +17,9 @@ const LOG_KEEP = 200
 const AGENT_KEEP = 40
 const TIMES_KEEP = 24
 const FILES_KEEP = 100
+// A row this young is not judged missing from the engine's list: the agent may
+// not be listed yet.
+const GONE_GRACE_MS = 30_000
 
 // Role colours, as in a terminal dashboard: orange lead, purple advisor,
 // blue swarm, green for finished work. Each has a bright twin for the glow.
@@ -255,15 +258,47 @@ async function addLog($: EngineInterface, who: LogRow['who'], text: string) {
   await update($, log, list => [...list, { at, who, text }].slice(-LOG_KEEP))
 }
 
+// The log line for an agent that ended, and the alert for one that ran in the
+// background (none for a foreground one: its parent already has the result).
+function endNote(row: AgentRow, status: string): { log: string; alert?: string } {
+  const verb = status === 'failed' || status === 'killed' ? status : 'done'
+  const alert = `${verb === 'done' ? 'Done' : verb === 'failed' ? 'Failed' : 'Stopped'}: ${clip(row.description, 80)}`
+  return { log: `${verb}: ${clip(row.description, 48)}`, alert: row.background ? alert : undefined }
+}
+
+async function alertEnd($: EngineInterface, text: string) {
+  $.ui.toast(text, { timeoutMs: 6000 })
+  await $.ui.notify(text, { title: 'Subagent finished' }).catch(() => undefined)
+}
+
+// Closes the open row of a subagent whose own turn just ended, as sync does
+// when it sees the engine list the agent as ended.
+async function closeAgent($: EngineInterface, agentId: string, status: 'completed' | 'failed' | 'killed') {
+  const at = await $.clock.now()
+  const row = (await read($, agents)).find(one => one.id === agentId && isOpen(one.status))
+  if (!row) return
+  await update($, agents, list =>
+    list.map(one => (one.id === agentId && isOpen(one.status) ? { ...one, status, endedAt: at } : one)),
+  )
+  openAgents = (await read($, agents)).filter(one => isOpen(one.status)).length
+  const note = endNote(row, status)
+  await addLog($, 'swarm', note.log)
+  if (note.alert) await alertEnd($, note.alert)
+}
+
 // Matches each open row against the engine's agent list: by id first, then
-// by description for a row whose spawn did not report an id yet.
+// by description for a row whose spawn did not report an id yet. A row the
+// resolved list lacks, past the grace, ended unseen (the engine drops a
+// finished agent's entry): it is closed. A failed list closes nothing.
 async function sync($: EngineInterface) {
   const at = await $.clock.now()
   let infos: AgentInfo[] = []
+  let listed = true
   try {
     infos = await $.agent.list()
   } catch {
     infos = []
+    listed = false
   }
   const ended: string[] = []
   const alerts: string[] = []
@@ -276,14 +311,20 @@ async function sync($: EngineInterface) {
     const info =
       infos.find(one => one.id === row.id) ??
       infos.find(one => !known.has(one.id) && one.description === row.description)
-    if (!info) return row
+    if (!info) {
+      // A workflow's agents are never listed: they close through turn.complete.
+      if (!listed || row.workflow || at - row.startedAt <= GONE_GRACE_MS) return row
+      changed = true
+      ended.push(`gone: ${clip(row.description, 48)}`)
+      return { ...row, status: 'completed', endedAt: at }
+    }
     known.add(info.id)
     if (info.status === row.status && info.id === row.id) return row
     changed = true
     if (!isOpen(info.status)) {
-      const verb = info.status === 'failed' || info.status === 'killed' ? info.status : 'done'
-      ended.push(`${verb}: ${clip(row.description, 48)}`)
-      if (row.background) alerts.push(`${verb === 'done' ? 'Done' : verb === 'failed' ? 'Failed' : 'Stopped'}: ${clip(row.description, 80)}`)
+      const note = endNote(row, info.status)
+      ended.push(note.log)
+      if (note.alert) alerts.push(note.alert)
     }
     return { ...row, id: info.id, status: info.status, endedAt: isOpen(info.status) ? undefined : at }
   })
@@ -305,10 +346,7 @@ async function sync($: EngineInterface) {
   if (changed) await update($, agents, () => [...next, ...seeded].slice(-AGENT_KEEP))
   openAgents = [...next, ...seeded].filter(row => isOpen(row.status)).length
   for (const text of ended) await addLog($, 'swarm', text)
-  for (const text of alerts) {
-    $.ui.toast(text, { timeoutMs: 6000 })
-    await $.ui.notify(text, { title: 'Subagent finished' }).catch(() => undefined)
-  }
+  for (const text of alerts) await alertEnd($, text)
   for (const row of seeded) await addLog($, 'swarm', `found running: ${clip(row.description, 48)}`)
 }
 
@@ -320,6 +358,7 @@ type SpawnInput = {
   parentModel: string
   fork: boolean
   background: boolean
+  workflow?: unknown
 }
 type ServerUse = { startedAt: number; endedAt?: number }
 
@@ -335,6 +374,7 @@ async function recordSpawn($: EngineInterface, e: SpawnInput) {
     startedAt: at,
     tools: 0,
     background: e.background,
+    ...(e.workflow ? { workflow: true } : {}),
   }
   openAgents += 1
   await update($, agents, list => [...list, row].slice(-AGENT_KEEP))
@@ -472,7 +512,11 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    if (!(e as { agentId?: string }).agentId) await markBusy($, false, e.durationMs).catch(() => undefined)
+    const agentId = (e as { agentId?: string }).agentId
+    if (agentId) {
+      const status = e.isAborted ? 'killed' : e.reason === 'error' ? 'failed' : 'completed'
+      await closeAgent($, agentId, status).catch(() => undefined)
+    } else await markBusy($, false, e.durationMs).catch(() => undefined)
 
     return done
   })
