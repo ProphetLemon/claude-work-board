@@ -188,12 +188,13 @@ test('a narrow pane gets a shorter limits line that keeps every percentage', asy
 
 // A board that runs its sync timer against the agent list a test sets.
 function swarm(on: On) {
-  const state: { list: unknown[] | 'broken' } = { list: [] }
+  // The id the engine gives a spawn: its tool call's, unless a test sets one.
+  const state: { list: unknown[] | 'broken'; agentId?: string } = { list: [] }
   const clock = engine(on, () => {
     if (state.list === 'broken') throw new Error('list failed')
     return { value: state.list }
   })
-  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: `id-${e.tool_use_id}` }) as never)
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: state.agentId ?? `id-${e.tool_use_id}` }) as never)
   on('turn.complete', (_, e) => ({ text: e.answer }))
   return { clock, state }
 }
@@ -319,4 +320,40 @@ test('a subagent turn.complete leaves the lead busy state alone', async ($, on) 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /working / })).toBeDefined()
   await ui.unmount()
+})
+
+test('a resumed agent keeps its one row and its tool calls count on it', async ($, on) => {
+  const { clock, state } = swarm(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const spawn = $.agent.spawn as unknown as Call
+  const call = $.tool.call as unknown as Call
+  await spawn(spawnArgs('t1'))
+  await $.turn.complete({ answer: '', durationMs: 5, isAborted: false, turnId: 'x', reason: 'answer', agentId: 'id-t1' } as never)
+  const ended = await board($, clock)
+  expect(ended.header).toMatch(/0 running · 1 done/)
+  await ended.ui.unmount()
+
+  // The resuming message raises a spawn under the same agent id.
+  state.agentId = 'id-t1'
+  await spawn(spawnArgs('t2', { resume: { agentId: 'id-t1' } }))
+  await call({ tool: 'Bash', command: 'ls', agentId: 'id-t1' })
+
+  const again = await board($, clock)
+  expect(again.header).toMatch(/1 running · 0 done/)
+  expect(await again.log(/resumed: task t1/)).toBe(true)
+  expect(await again.ui.find({ type: 'Text', text: /· 1 tools ·/ })).toBeDefined()
+  await again.ui.unmount()
+})
+
+test('a resume for an agent the board never saw adds a row under its id', async ($, on) => {
+  const { clock, state } = swarm(on)
+  state.agentId = 'old-1'
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await ($.agent.spawn as unknown as Call)(spawnArgs('t9', { resume: { agentId: 'old-1' } }))
+  await ($.tool.call as unknown as Call)({ tool: 'Bash', command: 'ls', agentId: 'old-1' })
+
+  const shown = await board($, clock)
+  expect(shown.header).toMatch(/1 running · 0 done/)
+  expect(await shown.ui.find({ type: 'Text', text: /· 1 tools ·/ })).toBeDefined()
+  await shown.ui.unmount()
 })

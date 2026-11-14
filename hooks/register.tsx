@@ -358,14 +358,30 @@ type SpawnInput = {
   parentModel: string
   fork: boolean
   background: boolean
+  resume?: { agentId: string }
   workflow?: unknown
 }
 type ServerUse = { startedAt: number; endedAt?: number }
 
 async function recordSpawn($: EngineInterface, e: SpawnInput) {
   const at = await $.clock.now()
+  const resumeId = e.resume?.agentId
+  // A resumed agent keeps its row: it opens again, under this call.
+  const before = resumeId ? (await read($, agents)).find(one => one.id === resumeId) : undefined
+  if (resumeId && before) {
+    if (!isOpen(before.status)) openAgents += 1
+    await update($, agents, list =>
+      list.map(one =>
+        one.id === resumeId
+          ? { ...one, status: 'running', endedAt: undefined, startedAt: at, toolUseId: e.tool_use_id }
+          : one,
+      ),
+    )
+    await addLog($, 'swarm', `resumed: ${clip(before.description, 48)}`)
+    return
+  }
   const row: AgentRow = {
-    id: e.tool_use_id,
+    id: resumeId ?? e.tool_use_id,
     toolUseId: e.tool_use_id,
     description: e.description,
     type: e.subagentType || (e.fork ? 'fork' : 'agent'),

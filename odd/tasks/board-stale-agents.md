@@ -41,7 +41,7 @@ The board exists to show what is running. Rows that never close make it say work
 Route: delegated direct, one writer. Trigger: 2 non-trivial files (`hooks/register.tsx`, `tests/board.test.tsx`), and the long-session backstop.
 
 - [x] T1 fix: close rows whose end the board missed (subagent `turn.complete`, the orphan rule in `sync`, workflow rows exempt), with tests
-- [ ] T2 fix: a resumed agent reopens its row instead of adding one, with tests
+- [x] T2 fix: a resumed agent reopens its row instead of adding one, with tests
 - [ ] T3 docs: the README's Swarm line says how a missed end is shown (`gone`) and that a resumed agent keeps its row
 
 ## Acceptance criteria
@@ -59,8 +59,9 @@ Route: delegated direct, one writer. Trigger: 2 non-trivial files (`hooks/regist
 
 ## Progress
 
-- T1 done. Evidence: tests `a row whose end was missed closes once the grace has passed`, `a list that fails to resolve closes nothing`, `a listed agent stays open however long it runs`, `a workflow row is never judged missing and closes on its own turn.complete`, `a subagent turn.complete closes its row as completed, killed or failed`, `a subagent turn.complete leaves the lead busy state alone`; tsc, plugin validate (ICON_MISSING warning only) and plugin test (13 pass) all passed. Commit: see T2's evidence.
+- T1 done. Evidence: tests `a row whose end was missed closes once the grace has passed`, `a list that fails to resolve closes nothing`, `a listed agent stays open however long it runs`, `a workflow row is never judged missing and closes on its own turn.complete`, `a subagent turn.complete closes its row as completed, killed or failed`, `a subagent turn.complete leaves the lead busy state alone`; tsc, plugin validate (ICON_MISSING warning only) and plugin test (13 pass) all passed. Commit: 89d24e4.
+- T2 done. Evidence: tests `a resumed agent keeps its one row and its tool calls count on it`, `a resume for an agent the board never saw adds a row under its id`; tsc, plugin validate (ICON_MISSING warning only) and plugin test (15 pass) all passed.
 
 ## Next step
 
-T2.
+T3.
