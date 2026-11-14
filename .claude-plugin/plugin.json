@@ -1,6 +1,6 @@
 {
   "name": "work-board",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A live board beside the chat: the main session, the advisor, the subagents and a session log",
   "types": "./types/index.d.ts"
 }
