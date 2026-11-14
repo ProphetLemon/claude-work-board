@@ -62,8 +62,12 @@ Route: delegated direct, one writer. Trigger: 2 non-trivial files (`hooks/regist
 - T1 done. Evidence: tests `a row whose end was missed closes once the grace has passed`, `a list that fails to resolve closes nothing`, `a listed agent stays open however long it runs`, `a workflow row is never judged missing and closes on its own turn.complete`, `a subagent turn.complete closes its row as completed, killed or failed`, `a subagent turn.complete leaves the lead busy state alone`; tsc, plugin validate (ICON_MISSING warning only) and plugin test (13 pass) all passed. Commit: 89d24e4.
 - T2 done. Evidence: tests `a resumed agent keeps its one row and its tool calls count on it`, `a resume for an agent the board never saw adds a row under its id`; tsc, plugin validate (ICON_MISSING warning only) and plugin test (15 pass) all passed.
 - T2 commit: ca91c90.
-- T3 done. README Swarm line updated; tsc, plugin validate and plugin test (15 pass) passed.
+- T3 done. README Swarm line updated; tsc, plugin validate and plugin test (15 pass) passed. Commit: 86a6246.
+- Parent check: `claude plugin test .` re-run on `86a6246`, 15 pass. Structural readback of the source diff matches the design.
+- Assessment (`gentle-ai review assess`, base `c7c5353`, committed only): `medium` (`executable_change` in `hooks/register.tsx`), `review_due: false` (`under_budget`). RDD is off, so no native review.
+- Known limits, not fixed here: a workflow agent with remote isolation has no local loop, so no `turn.complete` closes its row. `sync` writes a snapshot of the rows (an existing pattern), so a `turn.complete` close that lands during a sync can be undone until the next sync closes the row again, which can repeat the log line and the alert.
+- Not verified: the pane drawn live in a real session. Only the test kit's mounts were checked.
 
 ## Next step
 
-None: ready for the person to push or open a PR.
+The person decides on push, PR or merge. Reload or reinstall the mod to see the fix in the pane.
