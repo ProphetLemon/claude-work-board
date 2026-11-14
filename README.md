@@ -4,7 +4,7 @@ A Claude Code mod that keeps a live board beside the chat, so you can watch the 
 
 - **Lead**: the main session's model, effort, tool calls and steps, how long the current turn has been running and, once it ends, how long it took. Also the context window fill, the cost, and each rate limit with when it resets (the clock time within a day, days and hours beyond). It also lists the files the lead changed with Edit, Write or NotebookEdit, newest first. Denied or failed calls, subagents' edits and edits made from the shell (`sed`, `sd`, redirects) are not seen. On a narrow pane the limits line uses short names (`5h`, `7d`) and, if needed, drops the reset times.
 - **Advisor**: how many times the advisor was consulted, when it was last consulted and how long that call took, and a timeline of the calls.
-- **Swarm**: every subagent with its model, its tool calls, its elapsed time and whether it is running, done or failed.
+- **Swarm**: every subagent with its model, its tool calls, its elapsed time and whether it is running, done or failed. A subagent that finished while the board was not watching is shown as ended, with a `gone` line in the log. A resumed subagent keeps its row.
 - **Session log**: the latest events with their time.
 
 The board animates while something is happening (spinners, pulses along the connector lines, a breathing border on the active box, a typed-in log line). When nothing is happening it refreshes once a second. Subagents report no progress, so their bars show activity, not a percentage.
